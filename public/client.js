@@ -64,11 +64,9 @@
   let lastPoint = null;
 
   const PALETTE = [
-    "#000000", "#ffffff", "#c1c1c1", "#4b4b4b",
-    "#ff0000", "#ff8a00", "#ffe600", "#8cff00",
-    "#00ff90", "#00ffe6", "#0090ff", "#0000ff",
-    "#8c00ff", "#ff00e6", "#a05a2c", "#ffb6c1",
-    "#800000", "#808000", "#008080", "#000080",
+    "#111318", "#ef4444", "#f97316", "#facc15",
+    "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899",
+    "#a05a2c", "#ffffff",
   ];
 
   function showScreen(name) {
