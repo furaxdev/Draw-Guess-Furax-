@@ -51,6 +51,108 @@
   const chatMessages = document.getElementById("chat-messages");
   const chatForm = document.getElementById("chat-form");
   const chatInput = document.getElementById("chat-input");
+  const btnMute = document.getElementById("btn-mute");
+
+  // ------------------------------------------------------------------
+  // Effets sonores (synthétisés via Web Audio, aucun fichier externe)
+  // ------------------------------------------------------------------
+  var SFX = (function () {
+    var ctxAudio = null;
+    var muted = false;
+    try {
+      muted = window.localStorage.getItem("dg-muted") === "1";
+    } catch (e) {
+      muted = false;
+    }
+
+    function ensureContext() {
+      if (ctxAudio) return ctxAudio;
+      var AudioCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtor) return null;
+      ctxAudio = new AudioCtor();
+      return ctxAudio;
+    }
+
+    function unlock() {
+      var c = ensureContext();
+      if (c && c.state === "suspended" && c.resume) {
+        c.resume();
+      }
+    }
+
+    function tone(freq, duration, type, delay, volume) {
+      if (muted) return;
+      var c = ensureContext();
+      if (!c) return;
+      type = type || "sine";
+      delay = delay || 0;
+      volume = volume === undefined ? 0.18 : volume;
+      var startAt = c.currentTime + delay;
+      var osc = c.createOscillator();
+      var gain = c.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, startAt);
+      gain.gain.setValueAtTime(0.0001, startAt);
+      gain.gain.linearRampToValueAtTime(volume, startAt + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+      osc.connect(gain);
+      gain.connect(c.destination);
+      osc.start(startAt);
+      osc.stop(startAt + duration + 0.02);
+    }
+
+    return {
+      unlock: unlock,
+      isMuted: function () { return muted; },
+      setMuted: function (value) {
+        muted = value;
+        try {
+          window.localStorage.setItem("dg-muted", muted ? "1" : "0");
+        } catch (e) { /* stockage indisponible, tant pis */ }
+      },
+      click: function () { tone(520, 0.06, "square", 0, 0.08); },
+      join: function () { tone(440, 0.12, "sine", 0); tone(660, 0.14, "sine", 0.08); },
+      message: function () { tone(700, 0.05, "square", 0, 0.06); },
+      correct: function () {
+        tone(523, 0.1, "triangle", 0);
+        tone(659, 0.1, "triangle", 0.09);
+        tone(784, 0.18, "triangle", 0.18);
+      },
+      closeGuess: function () { tone(300, 0.08, "sawtooth", 0, 0.1); },
+      myTurn: function () {
+        tone(392, 0.12, "square", 0);
+        tone(494, 0.12, "square", 0.12);
+        tone(587, 0.2, "square", 0.24);
+      },
+      othersTurn: function () { tone(330, 0.15, "sine", 0, 0.1); },
+      tick: function () { tone(880, 0.05, "square", 0, 0.07); },
+      roundEnd: function () {
+        tone(392, 0.12, "sine", 0);
+        tone(330, 0.16, "sine", 0.12);
+      },
+      gameEnd: function () {
+        tone(523, 0.14, "triangle", 0);
+        tone(659, 0.14, "triangle", 0.14);
+        tone(784, 0.14, "triangle", 0.28);
+        tone(1047, 0.3, "triangle", 0.42);
+      },
+    };
+  })();
+
+  function updateMuteButton() {
+    btnMute.textContent = SFX.isMuted() ? "🔇" : "🔊";
+  }
+  updateMuteButton();
+
+  btnMute.addEventListener("click", () => {
+    SFX.unlock();
+    SFX.setMuted(!SFX.isMuted());
+    updateMuteButton();
+  });
+
+  ["click", "touchstart", "keydown"].forEach((evt) => {
+    window.addEventListener(evt, () => SFX.unlock(), { once: true, passive: true });
+  });
 
   // ------------------------------------------------------------------
   // État local
@@ -124,7 +226,9 @@
   });
 
   btnCopyCode.addEventListener("click", () => {
-    navigator.clipboard?.writeText(lobbyCode.textContent).catch(() => {});
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(lobbyCode.textContent).catch(() => {});
+    }
   });
 
   btnStartGame.addEventListener("click", () => {
@@ -217,9 +321,11 @@
     if (isDrawer) {
       wordDisplay.textContent = data.word.toUpperCase();
       addSystemMessage(`À toi de dessiner : "${data.word}"`);
+      SFX.myTurn();
     } else {
       wordDisplay.textContent = data.maskedWord;
       addSystemMessage(`${data.drawerName} dessine maintenant !`);
+      SFX.othersTurn();
     }
     timerDisplay.textContent = data.drawTime;
   });
@@ -228,29 +334,40 @@
     if (!isDrawer) wordDisplay.textContent = maskedWord;
   });
 
+  let lastTickSecond = null;
   socket.on("timer", ({ timeLeft }) => {
-    timerDisplay.textContent = Math.max(timeLeft, 0);
+    const clamped = Math.max(timeLeft, 0);
+    timerDisplay.textContent = clamped;
     timerDisplay.style.color = timeLeft <= 10 ? "#ff5c5c" : "";
+    if (clamped <= 5 && clamped > 0 && clamped !== lastTickSecond) {
+      SFX.tick();
+    }
+    lastTickSecond = clamped;
   });
 
   socket.on("guess_result", ({ correct, points }) => {
-    if (correct) addSystemMessage(`Bravo, tu as trouvé ! +${points} points`, true);
+    if (correct) {
+      addSystemMessage(`Bravo, tu as trouvé ! +${points} points`, true);
+      SFX.correct();
+    }
   });
 
   socket.on("round_end", ({ word, players }) => {
     toolbar.classList.add("hidden");
     revealedWordEl.textContent = word;
     const me = players.find((p) => p.id === myId);
-    roundEndSub.textContent = me?.guessed || isDrawer
+    roundEndSub.textContent = (me && me.guessed) || isDrawer
       ? "Bien joué !"
       : "Ce sera pour la prochaine fois...";
     roundEndOverlay.classList.remove("hidden");
+    SFX.roundEnd();
   });
 
   socket.on("game_end", ({ ranking }) => {
     hideOverlays();
     toolbar.classList.add("hidden");
     finalRanking.innerHTML = "";
+    SFX.gameEnd();
     ranking.forEach((p, i) => {
       const li = document.createElement("li");
       const medal = ["🥇", "🥈", "🥉"][i] || "";
@@ -283,8 +400,10 @@
     if (msg.system) {
       div.classList.add("system");
       div.textContent = msg.text;
+      if (msg.onlyMe) SFX.closeGuess();
     } else {
       div.innerHTML = `<span class="author">${escapeHtml(msg.name)}:</span>${escapeHtml(msg.text)}`;
+      if (msg.playerId !== myId) SFX.message();
     }
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
