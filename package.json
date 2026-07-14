@@ -1,0 +1,16 @@
+{
+  "name": "draw-guess-furax",
+  "version": "1.0.0",
+  "description": "Jeu de dessin et de devinettes multijoueur en temps réel, inspiré de skribbl.io",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
