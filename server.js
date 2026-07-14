@@ -49,6 +49,8 @@ const DEFAULT_SETTINGS = {
 const POINTS_MAX = 100;
 const POINTS_MIN = 20;
 const DRAWER_POINTS_PER_GUESSER = 25;
+const PAUSE_GRACE_MS = 90000;
+const DISCONNECT_FORGET_MS = 10 * 60 * 1000;
 
 function generateRoomCode() {
   let code;
@@ -115,7 +117,7 @@ class Room {
   constructor(code, settings) {
     this.code = code;
     this.settings = { ...DEFAULT_SETTINGS, ...settings };
-    /** @type {Map<string, Player>} */
+    /** @type {Map<string, Player>} clé = sessionId, stable même après reconnexion */
     this.players = new Map();
     this.hostId = null;
     this.state = "lobby"; // lobby | choosing | drawing | roundEnd | gameEnd
@@ -133,6 +135,10 @@ class Room {
     this.hintTimeout = null;
     this.turnEndTimeout = null;
     this.wordChoices = [];
+
+    // Pause pour connexion perdue en cours de dessin
+    this.paused = false;
+    this.pauseGraceTimeout = null;
   }
 
   toPublicState() {
@@ -143,6 +149,7 @@ class Room {
       settings: this.settings,
       round: this.round,
       currentDrawerId: this.currentDrawerId,
+      paused: this.paused,
       players: Array.from(this.players.values()).map((p) => ({
         id: p.id,
         name: p.name,
@@ -150,12 +157,20 @@ class Room {
         connected: p.connected,
         isDrawing: p.id === this.currentDrawerId,
         guessed: this.correctGuessers.has(p.id),
+        latency: p.latency,
       })),
     };
   }
 
   broadcastState() {
     io.to(this.code).emit("room_update", this.toPublicState());
+  }
+
+  emitToPlayer(playerId, event, payload) {
+    const player = this.players.get(playerId);
+    if (player && player.socketId) {
+      io.to(player.socketId).emit(event, payload);
+    }
   }
 
   connectedPlayers() {
@@ -183,6 +198,7 @@ class Room {
 
   nextTurn() {
     this.clearTimers();
+    this.clearPause();
     this.strokes = [];
     this.correctGuessers.clear();
 
@@ -228,7 +244,7 @@ class Room {
       text: `${drawer.name} choisit un mot...`,
     });
 
-    io.to(drawer.id).emit("choose_word", {
+    this.emitToPlayer(drawer.id, "choose_word", {
       choices: this.wordChoices,
       round: this.round,
       totalRounds: this.settings.rounds,
@@ -256,7 +272,7 @@ class Room {
 
     const drawer = this.players.get(this.currentDrawerId);
 
-    io.to(this.currentDrawerId).emit("turn_started", {
+    this.emitToPlayer(this.currentDrawerId, "turn_started", {
       word: this.currentWord,
       isDrawer: true,
       drawerId: this.currentDrawerId,
@@ -266,7 +282,7 @@ class Room {
       drawTime: this.settings.drawTime,
     });
 
-    io.to(this.code).except(this.currentDrawerId).emit("turn_started", {
+    io.to(this.code).except(drawer.socketId || "").emit("turn_started", {
       maskedWord: maskWord(this.currentWord, this.revealedIndexes),
       isDrawer: false,
       drawerId: this.currentDrawerId,
@@ -279,10 +295,13 @@ class Room {
     this.broadcastState();
     this.startTimer();
     this.scheduleHints();
+    this.checkConnectivity();
   }
 
   startTimer() {
+    if (this.timer) clearInterval(this.timer);
     this.timer = setInterval(() => {
+      if (this.paused) return;
       this.timeLeft--;
       io.to(this.code).emit("timer", { timeLeft: this.timeLeft });
       if (this.timeLeft <= 0) {
@@ -314,7 +333,8 @@ class Room {
         if (remaining.length > 1) {
           const idx = remaining[Math.floor(Math.random() * remaining.length)];
           this.revealedIndexes.add(idx);
-          io.to(this.code).except(this.currentDrawerId).emit("word_hint", {
+          const drawer = this.players.get(this.currentDrawerId);
+          io.to(this.code).except(drawer ? drawer.socketId || "" : "").emit("word_hint", {
             maskedWord: maskWord(this.currentWord, this.revealedIndexes),
           });
         }
@@ -347,7 +367,7 @@ class Room {
         system: true,
         text: `${player.name} a trouvé le mot !`,
       });
-      io.to(player.id).emit("guess_result", { correct: true, points });
+      this.emitToPlayer(player.id, "guess_result", { correct: true, points });
       this.broadcastState();
 
       const activeGuessers = this.connectedPlayers().filter(
@@ -363,7 +383,7 @@ class Room {
     }
 
     if (levenshtein(guess, answer) <= 1 && answer.length > 3) {
-      io.to(player.id).emit("chat_message", {
+      this.emitToPlayer(player.id, "chat_message", {
         system: true,
         text: `"${rawText}" est très proche !`,
         onlyMe: true,
@@ -377,6 +397,7 @@ class Room {
   endTurn(allGuessed) {
     if (this.state !== "drawing") return;
     this.clearTimers();
+    this.clearPause();
     this.state = "roundEnd";
 
     io.to(this.code).emit("round_end", {
@@ -396,6 +417,7 @@ class Room {
 
   endGame() {
     this.clearTimers();
+    this.clearPause();
     this.state = "gameEnd";
     this.currentDrawerId = null;
     const ranking = Array.from(this.players.values())
@@ -403,6 +425,66 @@ class Room {
       .sort((a, b) => b.score - a.score);
     io.to(this.code).emit("game_end", { ranking });
     this.broadcastState();
+  }
+
+  // -------------------------------------------------------------------
+  // Pause automatique quand la partie ne peut pas continuer (déco réseau)
+  // -------------------------------------------------------------------
+  checkConnectivity() {
+    if (this.state !== "drawing") return;
+
+    const drawer = this.players.get(this.currentDrawerId);
+    const drawerConnected = !!(drawer && drawer.connected);
+    const guessersConnected = this.connectedPlayers().filter(
+      (p) => p.id !== this.currentDrawerId
+    ).length;
+
+    const shouldPause = !drawerConnected || guessersConnected === 0;
+
+    if (shouldPause && !this.paused) {
+      this.pause(drawerConnected);
+    } else if (!shouldPause && this.paused) {
+      this.resume();
+    }
+  }
+
+  pause(drawerConnected) {
+    this.paused = true;
+    const message = drawerConnected
+      ? "Désolé, la connexion de votre adversaire semble buguée. Veuillez patienter le temps qu'elle revienne..."
+      : "Le dessinateur a été déconnecté. La partie reprendra dès son retour...";
+
+    io.to(this.code).emit("game_paused", { message });
+    this.broadcastState();
+
+    if (this.pauseGraceTimeout) clearTimeout(this.pauseGraceTimeout);
+    this.pauseGraceTimeout = setTimeout(() => {
+      if (!this.paused) return;
+      const drawer = this.players.get(this.currentDrawerId);
+      if (!drawer || !drawer.connected) {
+        // Le dessinateur n'est jamais revenu : on passe au suivant
+        this.clearPause();
+        this.endTurn(false);
+      } else {
+        // Le dessinateur est là mais plus personne pour deviner : on relance le chrono
+        this.resume();
+      }
+    }, PAUSE_GRACE_MS);
+  }
+
+  resume() {
+    if (!this.paused) return;
+    this.paused = false;
+    if (this.pauseGraceTimeout) clearTimeout(this.pauseGraceTimeout);
+    this.pauseGraceTimeout = null;
+    io.to(this.code).emit("game_resumed", {});
+    this.broadcastState();
+  }
+
+  clearPause() {
+    this.paused = false;
+    if (this.pauseGraceTimeout) clearTimeout(this.pauseGraceTimeout);
+    this.pauseGraceTimeout = null;
   }
 
   addPlayer(player) {
@@ -417,6 +499,8 @@ class Room {
     const player = this.players.get(id);
     if (!player) return;
     player.connected = false;
+    player.socketId = null;
+    player.disconnectedAt = Date.now();
 
     if (this.state === "lobby") {
       this.players.delete(id);
@@ -428,20 +512,40 @@ class Room {
       this.hostId = next ? next.id : null;
     }
 
-    if (this.state === "drawing" && this.currentDrawerId === id) {
-      this.endTurn(false);
-    } else if (this.connectedPlayers().length < 2 && this.state !== "lobby" && this.state !== "gameEnd") {
+    if (this.state === "drawing") {
+      this.checkConnectivity();
+    } else if (
+      this.connectedPlayers().length < 1 &&
+      this.state !== "lobby" &&
+      this.state !== "gameEnd"
+    ) {
       this.endGame();
     }
+  }
+
+  reconnectPlayer(id, socketId) {
+    const player = this.players.get(id);
+    if (!player) return null;
+    player.connected = true;
+    player.socketId = socketId;
+    player.disconnectedAt = null;
+    if (!this.hostId) this.hostId = player.id;
+    if (this.state === "drawing") {
+      this.checkConnectivity();
+    }
+    return player;
   }
 }
 
 class Player {
   constructor(id, name) {
-    this.id = id;
+    this.id = id; // sessionId, stable
+    this.socketId = null; // socket.id courant, change à chaque (re)connexion
     this.name = name;
     this.score = 0;
     this.connected = true;
+    this.latency = null;
+    this.disconnectedAt = null;
   }
 }
 
@@ -451,14 +555,21 @@ function sanitizeName(name) {
   return trimmed.length > 0 ? trimmed : "Joueur";
 }
 
+function sanitizeSessionId(id) {
+  if (typeof id !== "string") return null;
+  const trimmed = id.trim().slice(0, 64);
+  return /^[a-zA-Z0-9_-]{6,64}$/.test(trimmed) ? trimmed : null;
+}
+
 function roomEmptyCleanupCheck(room) {
   if (room.connectedPlayers().length === 0) {
     setTimeout(() => {
       if (room.connectedPlayers().length === 0) {
         room.clearTimers();
+        room.clearPause();
         rooms.delete(room.code);
       }
-    }, 30000);
+    }, DISCONNECT_FORGET_MS);
   }
 }
 
@@ -468,8 +579,43 @@ function roomEmptyCleanupCheck(room) {
 
 io.on("connection", (socket) => {
   let currentRoomCode = null;
+  let mySessionId = null;
 
-  socket.on("create_room", ({ name, settings } = {}) => {
+  function sendJoinSnapshot(room, player) {
+    if (room.strokes.length) {
+      socket.emit("canvas_history", room.strokes);
+    }
+    if (room.state === "drawing" || room.state === "roundEnd") {
+      const drawer = room.players.get(room.currentDrawerId);
+      const isDrawer = room.currentDrawerId === player.id;
+      socket.emit("turn_started", {
+        word: isDrawer ? room.currentWord : undefined,
+        maskedWord: isDrawer
+          ? undefined
+          : maskWord(room.currentWord, room.revealedIndexes),
+        isDrawer,
+        drawerId: room.currentDrawerId,
+        drawerName: drawer ? drawer.name : "",
+        round: room.round,
+        totalRounds: room.settings.rounds,
+        drawTime: room.settings.drawTime,
+      });
+      socket.emit("timer", { timeLeft: room.timeLeft });
+      if (room.paused) {
+        socket.emit("game_paused", {
+          message: "En attente de la reconnexion d'un joueur...",
+        });
+      }
+    } else if (room.state === "choosing" && room.currentDrawerId === player.id) {
+      socket.emit("choose_word", {
+        choices: room.wordChoices,
+        round: room.round,
+        totalRounds: room.settings.rounds,
+      });
+    }
+  }
+
+  socket.on("create_room", ({ name, settings, sessionId } = {}) => {
     const code = generateRoomCode();
     const room = new Room(code, {
       rounds: clampInt(settings?.rounds, 1, 10, DEFAULT_SETTINGS.rounds),
@@ -481,16 +627,19 @@ io.on("connection", (socket) => {
     });
     rooms.set(code, room);
 
-    const player = new Player(socket.id, sanitizeName(name));
+    const id = sanitizeSessionId(sessionId) || `s-${socket.id}`;
+    const player = new Player(id, sanitizeName(name));
+    player.socketId = socket.id;
     room.addPlayer(player);
     socket.join(code);
     currentRoomCode = code;
+    mySessionId = id;
 
-    socket.emit("joined_room", { code, playerId: socket.id });
+    socket.emit("joined_room", { code, playerId: id, sessionId: id });
     room.broadcastState();
   });
 
-  socket.on("join_room", ({ code, name } = {}) => {
+  socket.on("join_room", ({ code, name, sessionId } = {}) => {
     const room = rooms.get((code || "").toUpperCase());
     if (!room) {
       socket.emit("room_error", { message: "Cette partie n'existe pas." });
@@ -501,29 +650,17 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const player = new Player(socket.id, sanitizeName(name));
+    const id = sanitizeSessionId(sessionId) || `s-${socket.id}`;
+    const player = new Player(id, sanitizeName(name));
+    player.socketId = socket.id;
     room.addPlayer(player);
     socket.join(room.code);
     currentRoomCode = room.code;
+    mySessionId = id;
 
-    socket.emit("joined_room", { code: room.code, playerId: socket.id });
-    socket.emit("chat_history", []);
+    socket.emit("joined_room", { code: room.code, playerId: id, sessionId: id });
 
-    if (room.strokes.length) {
-      socket.emit("canvas_history", room.strokes);
-    }
-    if (room.state === "drawing" || room.state === "roundEnd") {
-      socket.emit("turn_started", {
-        maskedWord: maskWord(room.currentWord, room.revealedIndexes),
-        isDrawer: false,
-        drawerId: room.currentDrawerId,
-        drawerName: room.players.get(room.currentDrawerId)?.name,
-        round: room.round,
-        totalRounds: room.settings.rounds,
-        drawTime: room.settings.drawTime,
-      });
-      socket.emit("timer", { timeLeft: room.timeLeft });
-    }
+    sendJoinSnapshot(room, player);
 
     io.to(room.code).emit("chat_message", {
       system: true,
@@ -532,10 +669,47 @@ io.on("connection", (socket) => {
     room.broadcastState();
   });
 
+  socket.on("rejoin_room", ({ code, sessionId, name } = {}) => {
+    const room = rooms.get((code || "").toUpperCase());
+    const id = sanitizeSessionId(sessionId);
+    if (!room || !id || !room.players.has(id)) {
+      socket.emit("room_error", {
+        message: "Impossible de reprendre cette partie (elle n'existe plus).",
+        fatal: true,
+      });
+      return;
+    }
+
+    const player = room.reconnectPlayer(id, socket.id);
+    if (!player) {
+      socket.emit("room_error", {
+        message: "Impossible de reprendre cette partie.",
+        fatal: true,
+      });
+      return;
+    }
+    if (typeof name === "string" && name.trim()) {
+      player.name = sanitizeName(name);
+    }
+
+    socket.join(room.code);
+    currentRoomCode = room.code;
+    mySessionId = id;
+
+    socket.emit("joined_room", { code: room.code, playerId: id, sessionId: id });
+    sendJoinSnapshot(room, player);
+
+    io.to(room.code).emit("chat_message", {
+      system: true,
+      text: `${player.name} est de retour !`,
+    });
+    room.broadcastState();
+  });
+
   socket.on("start_game", () => {
     const room = rooms.get(currentRoomCode);
     if (!room) return;
-    if (room.hostId !== socket.id) return;
+    if (room.hostId !== mySessionId) return;
     if (room.connectedPlayers().length < 2) {
       socket.emit("room_error", {
         message: "Il faut au moins 2 joueurs pour commencer.",
@@ -548,14 +722,14 @@ io.on("connection", (socket) => {
   socket.on("choose_word", ({ word } = {}) => {
     const room = rooms.get(currentRoomCode);
     if (!room) return;
-    if (room.currentDrawerId !== socket.id) return;
+    if (room.currentDrawerId !== mySessionId) return;
     room.selectWord(word);
   });
 
   socket.on("draw", (payload) => {
     const room = rooms.get(currentRoomCode);
     if (!room) return;
-    if (room.currentDrawerId !== socket.id) return;
+    if (room.currentDrawerId !== mySessionId) return;
 
     if (payload?.type === "clear") {
       room.strokes = [];
@@ -569,15 +743,15 @@ io.on("connection", (socket) => {
   socket.on("chat_message", ({ text } = {}) => {
     const room = rooms.get(currentRoomCode);
     if (!room) return;
-    const player = room.players.get(socket.id);
+    const player = room.players.get(mySessionId);
     if (!player || typeof text !== "string") return;
     const clean = text.trim().slice(0, 200);
     if (!clean) return;
 
     const isGuessing =
       room.state === "drawing" &&
-      socket.id !== room.currentDrawerId &&
-      !room.correctGuessers.has(socket.id);
+      mySessionId !== room.currentDrawerId &&
+      !room.correctGuessers.has(mySessionId);
 
     if (isGuessing) {
       const handled = room.handleGuess(player, clean);
@@ -591,29 +765,45 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("ping_check", (_data, ack) => {
+    if (typeof ack === "function") ack();
+  });
+
+  socket.on("report_latency", (ms) => {
+    const room = rooms.get(currentRoomCode);
+    if (!room) return;
+    const player = room.players.get(mySessionId);
+    if (!player || typeof ms !== "number" || !isFinite(ms)) return;
+    player.latency = Math.max(0, Math.round(ms));
+    room.broadcastState();
+  });
+
   socket.on("leave_room", () => {
-    handleDisconnect();
+    handleDisconnect(true);
   });
 
   socket.on("disconnect", () => {
-    handleDisconnect();
+    handleDisconnect(false);
   });
 
-  function handleDisconnect() {
+  function handleDisconnect(explicit) {
     const room = rooms.get(currentRoomCode);
     if (!room) return;
-    const player = room.players.get(socket.id);
-    room.removePlayer(socket.id);
+    const player = room.players.get(mySessionId);
+    room.removePlayer(mySessionId);
     socket.leave(room.code);
     if (player) {
       io.to(room.code).emit("chat_message", {
         system: true,
-        text: `${player.name} a quitté la partie.`,
+        text: explicit
+          ? `${player.name} a quitté la partie.`
+          : `${player.name} a perdu la connexion...`,
       });
     }
     room.broadcastState();
     roomEmptyCleanupCheck(room);
     currentRoomCode = null;
+    mySessionId = null;
   }
 });
 

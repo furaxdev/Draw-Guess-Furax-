@@ -2,6 +2,35 @@
   const socket = io();
 
   // ------------------------------------------------------------------
+  // Session persistante (survit aux reconnexions et aux F5)
+  // ------------------------------------------------------------------
+  function getSessionId() {
+    var id = null;
+    try { id = window.localStorage.getItem("dg-session"); } catch (e) { /* ignore */ }
+    if (!id) {
+      id = "p-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+      try { window.localStorage.setItem("dg-session", id); } catch (e) { /* ignore */ }
+    }
+    return id;
+  }
+  const mySessionId = getSessionId();
+
+  function saveActiveRoom(code, name) {
+    try {
+      window.localStorage.setItem("dg-room", JSON.stringify({ code: code, name: name }));
+    } catch (e) { /* stockage indisponible, tant pis */ }
+  }
+  function loadActiveRoom() {
+    try {
+      const raw = window.localStorage.getItem("dg-room");
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+  function clearActiveRoom() {
+    try { window.localStorage.removeItem("dg-room"); } catch (e) { /* ignore */ }
+  }
+
+  // ------------------------------------------------------------------
   // Références DOM
   // ------------------------------------------------------------------
   const screens = {
@@ -53,6 +82,10 @@
   const chatForm = document.getElementById("chat-form");
   const chatInput = document.getElementById("chat-input");
   const btnMute = document.getElementById("btn-mute");
+
+  const connectionBanner = document.getElementById("connection-banner");
+  const pauseBanner = document.getElementById("pause-banner");
+  const pauseMessage = document.getElementById("pause-message");
 
   // ------------------------------------------------------------------
   // Effets sonores (synthétisés via Web Audio, aucun fichier externe)
@@ -158,7 +191,7 @@
   // ------------------------------------------------------------------
   // État local
   // ------------------------------------------------------------------
-  let myId = null;
+  let myId = mySessionId;
   let isDrawer = false;
   let currentColor = "#000000";
   let currentSize = 8;
@@ -189,6 +222,7 @@
     if (!name) return showHomeError("Entre un pseudo pour continuer.");
     socket.emit("create_room", {
       name,
+      sessionId: mySessionId,
       settings: {
         rounds: parseInt(inputRounds.value, 10) || 3,
         drawTime: parseInt(inputDrawtime.value, 10) || 80,
@@ -202,7 +236,7 @@
     const code = inputCode.value.trim().toUpperCase();
     if (!name) return showHomeError("Entre un pseudo pour continuer.");
     if (!code) return showHomeError("Entre un code de partie.");
-    socket.emit("join_room", { name, code });
+    socket.emit("join_room", { name, code, sessionId: mySessionId });
   });
 
   inputCode.addEventListener("keydown", (e) => {
@@ -216,15 +250,42 @@
     }, 4000);
   }
 
-  socket.on("room_error", ({ message }) => {
+  socket.on("room_error", ({ message, fatal }) => {
     homeError.textContent = message;
     lobbyError.textContent = message;
+    if (fatal) {
+      clearActiveRoom();
+      showScreen("home");
+    }
   });
 
   socket.on("joined_room", ({ code, playerId }) => {
     myId = playerId;
     lobbyCode.textContent = code;
-    showScreen("lobby");
+    saveActiveRoom(code, inputName.value.trim() || (loadActiveRoom() || {}).name || "Joueur");
+    connectionBanner.classList.add("hidden");
+    if (!screens.game.classList.contains("active")) {
+      showScreen("lobby");
+    }
+  });
+
+  // Reconnexion automatique : au premier chargement ET après toute
+  // coupure réseau, on retente de rejoindre la partie sauvegardée.
+  socket.on("connect", () => {
+    connectionBanner.classList.add("hidden");
+    const saved = loadActiveRoom();
+    if (saved && saved.code) {
+      socket.emit("rejoin_room", {
+        code: saved.code,
+        sessionId: mySessionId,
+        name: saved.name,
+      });
+    }
+    measureLatency();
+  });
+
+  socket.on("disconnect", () => {
+    connectionBanner.classList.remove("hidden");
   });
 
   btnCopyCode.addEventListener("click", () => {
@@ -238,6 +299,8 @@
   });
 
   btnBackHome.addEventListener("click", () => {
+    clearActiveRoom();
+    socket.emit("leave_room");
     window.location.reload();
   });
 
@@ -252,17 +315,32 @@
     const isHost = state.hostId === myId;
     btnStartGame.classList.toggle("hidden", !isHost);
 
-    if (state.state !== "lobby" && screens.lobby.classList.contains("active")) {
+    if (state.state !== "lobby" && !screens.game.classList.contains("active")) {
       showScreen("game");
       resizeCanvas();
     }
+
+    if (!state.paused) {
+      pauseBanner.classList.add("hidden");
+    }
   });
+
+  function pingBadge(latency) {
+    if (latency === null || latency === undefined) return "";
+    let cls = "ping-good";
+    if (latency > 300) cls = "ping-bad";
+    else if (latency > 120) cls = "ping-mid";
+    return `<span class="ping ${cls}">${latency}ms</span>`;
+  }
 
   function renderLobbyPlayers(state) {
     lobbyPlayers.innerHTML = "";
     state.players.forEach((p) => {
       const li = document.createElement("li");
-      li.innerHTML = `<span class="player-name">${p.id === state.hostId ? "👑 " : ""}${escapeHtml(p.name)}</span>`;
+      li.innerHTML = `
+        <span class="player-name">${p.id === state.hostId ? "👑 " : ""}${escapeHtml(p.name)}</span>
+        ${pingBadge(p.latency)}
+      `;
       if (!p.connected) li.classList.add("disconnected");
       lobbyPlayers.appendChild(li);
     });
@@ -277,8 +355,8 @@
       if (p.guessed) li.classList.add("guessed");
       if (!p.connected) li.classList.add("disconnected");
       li.innerHTML = `
-        <span class="player-name">${p.id === state.hostId ? "👑 " : ""}${p.isDrawing ? "✏️ " : ""}${escapeHtml(p.name)}</span>
-        <span class="score">${p.score}</span>
+        <span class="player-name">${p.id === state.hostId ? "👑 " : ""}${p.isDrawing ? "✏️ " : ""}${escapeHtml(p.name)}${p.guessed ? " ✅" : ""}</span>
+        <span class="player-meta">${pingBadge(p.latency)}<span class="score">${p.score}</span></span>
       `;
       gamePlayers.appendChild(li);
     });
@@ -289,6 +367,30 @@
     div.textContent = str;
     return div.innerHTML;
   }
+
+  // ------------------------------------------------------------------
+  // Pause automatique (connexion perdue d'un joueur)
+  // ------------------------------------------------------------------
+  socket.on("game_paused", ({ message }) => {
+    pauseMessage.textContent = message;
+    pauseBanner.classList.remove("hidden");
+  });
+
+  socket.on("game_resumed", () => {
+    pauseBanner.classList.add("hidden");
+  });
+
+  // ------------------------------------------------------------------
+  // Ping
+  // ------------------------------------------------------------------
+  function measureLatency() {
+    if (!socket.connected) return;
+    const sentAt = Date.now();
+    socket.emit("ping_check", null, () => {
+      socket.emit("report_latency", Date.now() - sentAt);
+    });
+  }
+  setInterval(measureLatency, 4000);
 
   // ------------------------------------------------------------------
   // Déroulement d'une manche
@@ -314,6 +416,7 @@
 
   socket.on("turn_started", (data) => {
     hideOverlays();
+    pauseBanner.classList.add("hidden");
     clearCanvasLocal();
     isDrawer = !!data.isDrawer;
     toolbar.classList.toggle("hidden", !isDrawer);
@@ -392,6 +495,15 @@
     e.preventDefault();
     const text = chatInput.value.trim();
     if (!text) return;
+
+    if (text.toLowerCase() === "/clear") {
+      chatMessages.innerHTML = "";
+      chatInput.value = "";
+      return;
+    }
+
+    triggerEasterEggsFromText(text);
+
     socket.emit("chat_message", { text });
     chatInput.value = "";
   });
@@ -405,7 +517,10 @@
       if (msg.onlyMe) SFX.closeGuess();
     } else {
       div.innerHTML = `<span class="author">${escapeHtml(msg.name)}:</span>${escapeHtml(msg.text)}`;
-      if (msg.playerId !== myId) SFX.message();
+      if (msg.playerId !== myId) {
+        SFX.message();
+        triggerEasterEggsFromText(msg.text);
+      }
     }
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -570,4 +685,56 @@
   window.addEventListener("resize", () => {
     if (screens.game.classList.contains("active")) resizeCanvas();
   });
+
+  // ------------------------------------------------------------------
+  // Easter eggs 🥚
+  // ------------------------------------------------------------------
+  function spawnConfetti() {
+    const colors = ["#ef4444", "#f97316", "#facc15", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899"];
+    for (let i = 0; i < 60; i++) {
+      const el = document.createElement("div");
+      el.className = "confetti-piece";
+      el.style.left = Math.random() * 100 + "vw";
+      el.style.background = colors[Math.floor(Math.random() * colors.length)];
+      el.style.animationDuration = (2 + Math.random() * 2) + "s";
+      el.style.animationDelay = (Math.random() * 0.4) + "s";
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 5000);
+    }
+  }
+
+  function triggerPartyMode() {
+    document.body.classList.add("party-mode");
+    SFX.gameEnd();
+    spawnConfetti();
+    addSystemMessage("🎮 Konami code activé ! Mode fête pendant 8 secondes !");
+    setTimeout(() => document.body.classList.remove("party-mode"), 8000);
+  }
+
+  const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
+  let konamiProgress = 0;
+  window.addEventListener("keydown", (e) => {
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (key === KONAMI[konamiProgress]) {
+      konamiProgress++;
+      if (konamiProgress === KONAMI.length) {
+        konamiProgress = 0;
+        triggerPartyMode();
+      }
+    } else {
+      konamiProgress = key === KONAMI[0] ? 1 : 0;
+    }
+  });
+
+  let lastFuraxEgg = 0;
+  function triggerEasterEggsFromText(text) {
+    if (/furax/i.test(text)) {
+      const now = Date.now();
+      if (now - lastFuraxEgg > 3000) {
+        lastFuraxEgg = now;
+        spawnConfetti();
+        addSystemMessage("🦊🔥 FURAX EST DANS LA PLACE !");
+      }
+    }
+  }
 })();
