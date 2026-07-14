@@ -21,7 +21,13 @@ function getWordPool(difficulty) {
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  // Tolérance élevée aux connexions instables (Wi-Fi capricieux, DNS
+  // tunneling type BrowseDNS, etc.) : évite de considérer un joueur
+  // déconnecté pour un simple pic de latence passager.
+  pingInterval: 20000,
+  pingTimeout: 45000,
+});
 
 const PORT = process.env.PORT || 3000;
 
@@ -50,6 +56,7 @@ const POINTS_MAX = 100;
 const POINTS_MIN = 20;
 const DRAWER_POINTS_PER_GUESSER = 25;
 const PAUSE_GRACE_MS = 90000;
+const PAUSE_DEBOUNCE_MS = 5000;
 const DISCONNECT_FORGET_MS = 10 * 60 * 1000;
 
 function generateRoomCode() {
@@ -139,6 +146,7 @@ class Room {
     // Pause pour connexion perdue en cours de dessin
     this.paused = false;
     this.pauseGraceTimeout = null;
+    this.pendingPauseTimeout = null;
   }
 
   toPublicState() {
@@ -430,21 +438,36 @@ class Room {
   // -------------------------------------------------------------------
   // Pause automatique quand la partie ne peut pas continuer (déco réseau)
   // -------------------------------------------------------------------
-  checkConnectivity() {
-    if (this.state !== "drawing") return;
-
+  connectivitySnapshot() {
     const drawer = this.players.get(this.currentDrawerId);
     const drawerConnected = !!(drawer && drawer.connected);
     const guessersConnected = this.connectedPlayers().filter(
       (p) => p.id !== this.currentDrawerId
     ).length;
+    return { drawerConnected, shouldPause: !drawerConnected || guessersConnected === 0 };
+  }
 
-    const shouldPause = !drawerConnected || guessersConnected === 0;
+  checkConnectivity() {
+    if (this.state !== "drawing") return;
+    const { drawerConnected, shouldPause } = this.connectivitySnapshot();
 
-    if (shouldPause && !this.paused) {
-      this.pause(drawerConnected);
-    } else if (!shouldPause && this.paused) {
-      this.resume();
+    if (shouldPause) {
+      if (this.paused || this.pendingPauseTimeout) return;
+      // On attend quelques secondes avant de vraiment mettre en pause :
+      // une micro-coupure réseau qui se résout toute seule ne doit pas
+      // interrompre la partie ni afficher de bannière inutilement.
+      this.pendingPauseTimeout = setTimeout(() => {
+        this.pendingPauseTimeout = null;
+        if (this.state !== "drawing") return;
+        const check = this.connectivitySnapshot();
+        if (check.shouldPause) this.pause(check.drawerConnected);
+      }, PAUSE_DEBOUNCE_MS);
+    } else {
+      if (this.pendingPauseTimeout) {
+        clearTimeout(this.pendingPauseTimeout);
+        this.pendingPauseTimeout = null;
+      }
+      if (this.paused) this.resume();
     }
   }
 
@@ -485,6 +508,8 @@ class Room {
     this.paused = false;
     if (this.pauseGraceTimeout) clearTimeout(this.pauseGraceTimeout);
     this.pauseGraceTimeout = null;
+    if (this.pendingPauseTimeout) clearTimeout(this.pendingPauseTimeout);
+    this.pendingPauseTimeout = null;
   }
 
   addPlayer(player) {
