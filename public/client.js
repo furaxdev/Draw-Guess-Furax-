@@ -390,7 +390,7 @@
       socket.emit("report_latency", Date.now() - sentAt);
     });
   }
-  setInterval(measureLatency, 4000);
+  setInterval(measureLatency, 1000);
 
   // ------------------------------------------------------------------
   // Déroulement d'une manche
