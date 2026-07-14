@@ -2,7 +2,22 @@ const path = require("path");
 const http = require("http");
 const express = require("express");
 const { Server } = require("socket.io");
-const WORDS = require("./words.js");
+const WORD_BANK = require("./words.js");
+
+const DIFFICULTIES = ["facile", "moyen", "difficile", "mixte"];
+
+function getWordPool(difficulty) {
+  switch (difficulty) {
+    case "facile":
+      return WORD_BANK.facile;
+    case "moyen":
+      return WORD_BANK.moyen;
+    case "difficile":
+      return WORD_BANK.difficile;
+    default:
+      return WORD_BANK.all;
+  }
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -28,6 +43,7 @@ const DEFAULT_SETTINGS = {
   rounds: 3,
   drawTime: 80,
   maxPlayers: 12,
+  difficulty: "mixte",
 };
 
 const POINTS_MAX = 100;
@@ -82,9 +98,10 @@ function maskWord(word, revealedIndexes) {
     .join(" ");
 }
 
-function pickWordChoices(usedWords, count = 3) {
-  const available = WORDS.filter((w) => !usedWords.has(w));
-  const pool = available.length >= count ? available : WORDS;
+function pickWordChoices(usedWords, difficulty, count = 3) {
+  const fullPool = getWordPool(difficulty);
+  const available = fullPool.filter((w) => !usedWords.has(w));
+  const pool = available.length >= count ? available : fullPool;
   const choices = [];
   const poolCopy = [...pool];
   while (choices.length < count && poolCopy.length > 0) {
@@ -204,7 +221,7 @@ class Room {
     this.currentWord = null;
     this.revealedIndexes = new Set();
     this.state = "choosing";
-    this.wordChoices = pickWordChoices(this.usedWords, 3);
+    this.wordChoices = pickWordChoices(this.usedWords, this.settings.difficulty, 3);
 
     io.to(this.code).emit("chat_message", {
       system: true,
@@ -458,6 +475,9 @@ io.on("connection", (socket) => {
       rounds: clampInt(settings?.rounds, 1, 10, DEFAULT_SETTINGS.rounds),
       drawTime: clampInt(settings?.drawTime, 30, 240, DEFAULT_SETTINGS.drawTime),
       maxPlayers: DEFAULT_SETTINGS.maxPlayers,
+      difficulty: DIFFICULTIES.includes(settings?.difficulty)
+        ? settings.difficulty
+        : DEFAULT_SETTINGS.difficulty,
     });
     rooms.set(code, room);
 

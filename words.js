@@ -1,5 +1,6 @@
-// Banque de mots en français pour le jeu de dessin
-module.exports = [
+// Banque de mots en français pour le jeu de dessin, classée par difficulté
+
+const facile = [
   "chat", "chien", "maison", "arbre", "soleil", "lune", "étoile", "voiture",
   "vélo", "avion", "bateau", "train", "fleur", "montagne", "plage", "océan",
   "rivière", "pont", "château", "église", "école", "hôpital", "restaurant",
@@ -13,7 +14,7 @@ module.exports = [
   "abeille", "araignée", "fourmi", "coccinelle", "escargot", "dragon",
   "licorne", "fantôme", "sorcière", "vampire", "zombie", "robot",
   "extraterrestre", "astronaute", "fusée", "planète", "arc-en-ciel", "nuage",
-  "pluie", "neige", "orage", "éclair", "feu", "glace", "eau", "vent",
+  "pluie", "neige", "orage", "éclair", "feu", "eau", "vent",
   "guitare", "piano", "violon", "batterie", "trompette", "microphone",
   "téléphone", "ordinateur", "télévision", "appareil photo", "livre",
   "crayon", "stylo", "ciseaux", "parapluie", "lunettes", "chapeau",
@@ -25,18 +26,57 @@ module.exports = [
   "brosse à dents", "savon", "serviette", "douche", "baignoire",
   "réfrigérateur", "four", "micro-ondes", "grille-pain", "cafetière",
   "aspirateur", "balai", "seau", "marteau", "tournevis", "scie", "clou",
-  "vis", "échelle", "pinceau", "peinture", "puzzle", "dé", "cartes à jouer",
+  "vis", "pinceau", "peinture", "puzzle", "dé", "cartes à jouer",
   "échecs", "footballeur", "basketball", "tennis", "natation", "ski",
-  "surf", "escalade", "danse", "yoga", "clown", "magicien", "pirate",
+  "surf", "danse", "clown", "magicien", "pirate",
   "chevalier", "roi", "reine", "prince", "princesse", "cowboy", "policier",
-  "pompier", "médecin", "infirmier", "professeur", "chef cuisinier",
-  "musicien", "peintre", "photographe", "scientifique", "astronaute",
-  "pyramide", "tour Eiffel", "statue de la Liberté", "grande muraille",
-  "volcan", "désert", "forêt", "jungle", "île", "cascade", "grotte",
-  "iceberg", "aurore boréale", "tornade", "tsunami", "tremblement de terre",
-  "sablier", "bougie d'anniversaire", "confettis", "feu d'artifice",
-  "guirlande", "sapin de Noël", "citrouille", "oeuf de Pâques", "cadeaux",
-  "carrousel", "montagnes russes", "grande roue", "trampoline", "toboggan",
-  "balançoire", "cerf-volant", "bulle de savon", "toupie", "yo-yo",
-  "marionnette", "peluche", "poupée", "robot jouet", "lego", "puzzle",
+  "pompier", "médecin", "infirmier", "professeur", "musicien", "volcan",
+  "désert", "forêt", "jungle", "île", "cascade", "grotte", "sablier",
+  "confettis", "sapin de Noël", "citrouille", "poupée", "peluche",
+  "toupie", "yo-yo",
 ];
+
+const moyen = [
+  "aurore boréale", "tornade", "tsunami", "tremblement de terre",
+  "pyramide", "tour Eiffel", "statue de la Liberté", "grande muraille",
+  "iceberg", "bougie d'anniversaire", "feu d'artifice", "guirlande",
+  "oeuf de Pâques", "carrousel", "montagnes russes", "grande roue",
+  "trampoline", "toboggan", "balançoire", "cerf-volant", "bulle de savon",
+  "marionnette", "robot jouet", "chef cuisinier", "photographe",
+  "scientifique", "escalade", "yoga", "brosse à dents électrique",
+  "machine à laver", "sèche-cheveux", "réveil-matin", "planche à voile",
+  "montgolfière", "sous-marin", "hélicoptère", "fusée spatiale",
+  "station spatiale", "labyrinthe de jardin", "épouvantail",
+  "moulin à vent", "phare", "cabine téléphonique", "distributeur automatique",
+  "escalator", "ascenseur", "roue de secours", "extincteur",
+  "gilet de sauvetage", "parachute", "trapèze", "funambule",
+  "dompteur de lions", "chapiteau de cirque", "manège",
+];
+
+const difficile = [
+  "jalousie", "procrastination", "démocratie", "nostalgie", "gravité",
+  "incognito", "hiéroglyphe", "métamorphose", "kaléidoscope", "labyrinthe",
+  "camouflage", "hypnose", "réincarnation", "bureaucratie", "mirage",
+  "hologramme", "paranoïa", "déjà-vu", "mélancolie", "euphorie", "vertige",
+  "claustrophobie", "insomnie", "hallucination", "illusion d'optique",
+  "point de non-retour", "effet papillon", "voyage dans le temps",
+  "réalité virtuelle", "intelligence artificielle", "trou noir", "big bang",
+  "évolution", "mutation génétique", "clonage", "téléportation",
+  "invisibilité", "sixième sens", "paradoxe", "existentialisme",
+  "philosophie", "métaphysique", "physique quantique", "atome", "molécule",
+  "cellule", "bactérie", "virus", "vaccin", "anticorps", "chromosome",
+  "adn", "symbiose", "écosystème", "biodiversité", "réchauffement climatique",
+  "empreinte carbone", "panneau solaire", "éolienne", "recyclage",
+  "libre arbitre", "conscience", "inconscient", "karma", "destin",
+  "improvisation", "négociation", "corruption", "mondialisation",
+  "inflation", "capitalisme", "anarchie", "utopie", "dystopie",
+  "propagande", "censure", "espionnage", "cybersécurité", "algorithme",
+  "cryptomonnaie", "réalité augmentée", "singularité technologique",
+];
+
+module.exports = {
+  facile,
+  moyen,
+  difficile,
+  all: [...facile, ...moyen, ...difficile],
+};

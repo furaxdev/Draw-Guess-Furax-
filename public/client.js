@@ -18,6 +18,7 @@
   const btnJoin = document.getElementById("btn-join");
   const inputRounds = document.getElementById("input-rounds");
   const inputDrawtime = document.getElementById("input-drawtime");
+  const inputDifficulty = document.getElementById("input-difficulty");
   const homeError = document.getElementById("home-error");
 
   const lobbyCode = document.getElementById("lobby-code");
@@ -191,6 +192,7 @@
       settings: {
         rounds: parseInt(inputRounds.value, 10) || 3,
         drawTime: parseInt(inputDrawtime.value, 10) || 80,
+        difficulty: inputDifficulty.value,
       },
     });
   });
