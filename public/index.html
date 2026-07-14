@@ -4,20 +4,38 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Dessine & Devine</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎨</text></svg>" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2246%22 fill=%22%237c6ff0%22/><circle cx=%2235%22 cy=%2235%22 r=%228%22 fill=%22%23ef4444%22/><circle cx=%2265%22 cy=%2235%22 r=%228%22 fill=%22%23facc15%22/><circle cx=%2235%22 cy=%2265%22 r=%228%22 fill=%22%2322c55e%22/><circle cx=%2265%22 cy=%2265%22 r=%228%22 fill=%22%233b82f6%22/></svg>" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
+<div id="update-toast" class="update-toast hidden">
+  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+  <span>Oh&nbsp;! Une mise à jour est disponible&nbsp;! Actualise ici</span>
+  <button id="btn-refresh-update" class="btn btn-primary btn-tiny">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.5 6.5L3 16"/><path d="M3 12a9 9 0 0 1 15.5-6.5L21 8"/><polyline points="21 3 21 8 16 8"/><polyline points="3 21 3 16 8 16"/></svg>
+    Actualiser
+  </button>
+</div>
+
 <div class="brand-pill">dessine-et-devine</div>
-<button id="btn-mute" class="mute-btn" title="Couper/activer le son">🔊</button>
-<div id="connection-banner" class="connection-banner hidden">🔌 Connexion perdue, tentative de reconnexion...</div>
-<div id="pause-banner" class="pause-banner hidden">⏸️ <span id="pause-message"></span></div>
+<button id="btn-mute" class="mute-btn" title="Couper/activer le son"></button>
+<div id="connection-banner" class="connection-banner hidden">
+  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="2" x2="22" y2="22"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M5 13a10 10 0 0 1 3.5-2.4"/><path d="M19 13a10 10 0 0 0-3-2.2"/><path d="M2 8.5a15 15 0 0 1 4.5-3"/><path d="M22 8.5a15 15 0 0 0-6-3.3"/><circle cx="12" cy="20" r="1" fill="currentColor" stroke="none"/></svg>
+  Connexion perdue, tentative de reconnexion...
+</div>
+<div id="pause-banner" class="pause-banner hidden">
+  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="10" y1="9" x2="10" y2="15"/><line x1="14" y1="9" x2="14" y2="15"/></svg>
+  <span id="pause-message"></span>
+</div>
 
 <!-- ÉCRAN D'ACCUEIL -->
 <section id="screen-home" class="screen active">
   <div class="home-card">
-    <h1 class="logo">🎨 Dessine &amp; Devine</h1>
+    <h1 class="logo">
+      <svg class="icon icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c-5.5 0-10-4-10-9a10 10 0 0 1 10-10c5 0 9 3.5 9 8 0 2.5-2 4-4 4h-2a2 2 0 0 0-1 3.7c.3.5.3 1.1 0 1.6-.5.9-1.5 1.7-2 1.7Z"/><circle cx="7" cy="10" r="1.3" fill="currentColor" stroke="none"/><circle cx="11" cy="6.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.3" fill="currentColor" stroke="none"/></svg>
+      Dessine &amp; Devine
+    </h1>
     <p class="tagline">Dessine, devine, rigole entre amis !</p>
 
     <input id="input-name" type="text" placeholder="Ton pseudo" maxlength="18" autocomplete="off" />
@@ -62,7 +80,9 @@
     <h2>Salle d'attente</h2>
     <div class="room-code-box">
       Code de la partie : <span id="lobby-code">-----</span>
-      <button id="btn-copy-code" class="btn btn-tiny" title="Copier le code">📋</button>
+      <button id="btn-copy-code" class="btn btn-tiny" title="Copier le code">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2"/><rect x="9" y="2" width="6" height="4" rx="1"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+      </button>
     </div>
     <ul id="lobby-players" class="player-list"></ul>
     <p class="lobby-hint">Il faut au moins 2 joueurs pour commencer.</p>
@@ -102,7 +122,10 @@
         </div>
         <div id="game-end-overlay" class="overlay hidden">
           <div class="overlay-card">
-            <h3>🏆 Classement final</h3>
+            <h3>
+              <svg class="icon icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8v4a4 4 0 0 1-8 0V4Z"/><path d="M8 5H5a3 3 0 0 0 3 4"/><path d="M16 5h3a3 3 0 0 1-3 4"/><line x1="12" y1="13" x2="12" y2="17"/><path d="M9 21h6"/><path d="M9.5 17h5l.5 4h-6l.5-4Z"/></svg>
+              Classement final
+            </h3>
             <ol id="final-ranking" class="ranking-list"></ol>
             <button id="btn-back-home" class="btn btn-primary">Retour à l'accueil</button>
           </div>
@@ -118,8 +141,12 @@
           <button class="size-btn" data-size="16">●</button>
           <button class="size-btn" data-size="28">●</button>
         </div>
-        <button id="btn-eraser" class="btn btn-tool" title="Gomme">🧽</button>
-        <button id="btn-clear" class="btn btn-tool" title="Tout effacer">🗑️</button>
+        <button id="btn-eraser" class="btn btn-tool" title="Gomme">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4-4a2 2 0 0 1 0-2.8L14 3.4a2 2 0 0 1 2.8 0l4 4a2 2 0 0 1 0 2.8L11 21H7Z"/><line x1="6" y1="14" x2="12" y2="20"/></svg>
+        </button>
+        <button id="btn-clear" class="btn btn-tool" title="Tout effacer">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><path d="M6 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/><path d="M19 7l-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 7"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        </button>
       </div>
     </main>
 

@@ -31,6 +31,10 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
+// Identifiant unique généré à chaque démarrage du process (donc à chaque
+// déploiement) : sert au client à détecter qu'une nouvelle version tourne.
+const SERVER_VERSION = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/healthz", (req, res) => {
@@ -605,6 +609,8 @@ function roomEmptyCleanupCheck(room) {
 io.on("connection", (socket) => {
   let currentRoomCode = null;
   let mySessionId = null;
+
+  socket.emit("server_info", { version: SERVER_VERSION });
 
   function sendJoinSnapshot(room, player) {
     if (room.strokes.length) {

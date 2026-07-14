@@ -86,6 +86,22 @@
   const connectionBanner = document.getElementById("connection-banner");
   const pauseBanner = document.getElementById("pause-banner");
   const pauseMessage = document.getElementById("pause-message");
+  const updateToast = document.getElementById("update-toast");
+  const btnRefreshUpdate = document.getElementById("btn-refresh-update");
+
+  // ------------------------------------------------------------------
+  // Icônes SVG inline (aucune dépendance réseau, pas d'emoji)
+  // ------------------------------------------------------------------
+  const ICONS = {
+    volumeOn: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 5V4L8 9H4Z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a9 9 0 0 1 0 12"/></svg>',
+    volumeOff: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 5V4L8 9H4Z"/><line x1="16" y1="9" x2="22" y2="15"/><line x1="22" y1="9" x2="16" y2="15"/></svg>',
+    crown: '<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M3 8l4 3 5-6 5 6 4-3-2 10H5L3 8Z"/></svg>',
+    pencil: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+    checkCircle: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="8 12 11 15 16 9"/></svg>',
+    medal: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="15" r="6"/><path d="M9 10 6 3h3l3 5 3-5h3l-3 7"/></svg>',
+    gamepad: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="5"/><line x1="7" y1="10" x2="7" y2="14"/><line x1="5" y1="12" x2="9" y2="12"/><circle cx="16" cy="10.5" r="1" fill="currentColor" stroke="none"/><circle cx="18.5" cy="13" r="1" fill="currentColor" stroke="none"/></svg>',
+    flame: '<svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2c1 3-3 4-3 8a3 3 0 0 0 6 0c0-1-.5-1.8-1-2.5.8.3 3 1.8 3 5.5a5 5 0 0 1-10 0c0-5 3-7 5-11Z"/></svg>',
+  };
 
   // ------------------------------------------------------------------
   // Effets sonores (synthétisés via Web Audio, aucun fichier externe)
@@ -174,7 +190,7 @@
   })();
 
   function updateMuteButton() {
-    btnMute.textContent = SFX.isMuted() ? "🔇" : "🔊";
+    btnMute.innerHTML = SFX.isMuted() ? ICONS.volumeOff : ICONS.volumeOn;
   }
   updateMuteButton();
 
@@ -288,6 +304,24 @@
     connectionBanner.classList.remove("hidden");
   });
 
+  // Toast "mise à jour disponible" : le serveur annonce sa version à
+  // chaque connexion. Si elle change en cours de session, c'est qu'un
+  // déploiement a eu lieu entre-temps.
+  let knownServerVersion = null;
+  socket.on("server_info", ({ version }) => {
+    if (knownServerVersion === null) {
+      knownServerVersion = version;
+      return;
+    }
+    if (version !== knownServerVersion) {
+      updateToast.classList.remove("hidden");
+    }
+  });
+
+  btnRefreshUpdate.addEventListener("click", () => {
+    window.location.reload();
+  });
+
   btnCopyCode.addEventListener("click", () => {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(lobbyCode.textContent).catch(() => {});
@@ -338,7 +372,7 @@
     state.players.forEach((p) => {
       const li = document.createElement("li");
       li.innerHTML = `
-        <span class="player-name">${p.id === state.hostId ? "👑 " : ""}${escapeHtml(p.name)}</span>
+        <span class="player-name">${p.id === state.hostId ? ICONS.crown : ""}${escapeHtml(p.name)}</span>
         ${pingBadge(p.latency)}
       `;
       if (!p.connected) li.classList.add("disconnected");
@@ -355,7 +389,7 @@
       if (p.guessed) li.classList.add("guessed");
       if (!p.connected) li.classList.add("disconnected");
       li.innerHTML = `
-        <span class="player-name">${p.id === state.hostId ? "👑 " : ""}${p.isDrawing ? "✏️ " : ""}${escapeHtml(p.name)}${p.guessed ? " ✅" : ""}</span>
+        <span class="player-name">${p.id === state.hostId ? ICONS.crown : ""}${p.isDrawing ? ICONS.pencil : ""}${escapeHtml(p.name)}${p.guessed ? ICONS.checkCircle : ""}</span>
         <span class="player-meta">${pingBadge(p.latency)}<span class="score">${p.score}</span></span>
       `;
       gamePlayers.appendChild(li);
@@ -475,8 +509,9 @@
     SFX.gameEnd();
     ranking.forEach((p, i) => {
       const li = document.createElement("li");
-      const medal = ["🥇", "🥈", "🥉"][i] || "";
-      li.textContent = `${medal} ${p.name} — ${p.score} points`;
+      const medalClass = ["medal-gold", "medal-silver", "medal-bronze"][i];
+      const medal = medalClass ? `<span class="${medalClass}">${ICONS.medal}</span>` : "";
+      li.innerHTML = `${medal} ${escapeHtml(p.name)} — ${p.score} points`;
       finalRanking.appendChild(li);
     });
     gameEndOverlay.classList.remove("hidden");
@@ -526,10 +561,10 @@
     chatMessages.scrollTop = chatMessages.scrollHeight;
   });
 
-  function addSystemMessage(text, correct = false) {
+  function addSystemMessage(text, correct = false, iconHtml = "") {
     const div = document.createElement("div");
     div.className = "msg system" + (correct ? " correct" : "");
-    div.textContent = text;
+    div.innerHTML = iconHtml + escapeHtml(text);
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
@@ -687,7 +722,7 @@
   });
 
   // ------------------------------------------------------------------
-  // Easter eggs 🥚
+  // Easter eggs
   // ------------------------------------------------------------------
   function spawnConfetti() {
     const colors = ["#ef4444", "#f97316", "#facc15", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899"];
@@ -707,7 +742,7 @@
     document.body.classList.add("party-mode");
     SFX.gameEnd();
     spawnConfetti();
-    addSystemMessage("🎮 Konami code activé ! Mode fête pendant 8 secondes !");
+    addSystemMessage("Konami code activé ! Mode fête pendant 8 secondes !", false, ICONS.gamepad);
     setTimeout(() => document.body.classList.remove("party-mode"), 8000);
   }
 
@@ -733,7 +768,7 @@
       if (now - lastFuraxEgg > 3000) {
         lastFuraxEgg = now;
         spawnConfetti();
-        addSystemMessage("🦊🔥 FURAX EST DANS LA PLACE !");
+        addSystemMessage("FURAX EST DANS LA PLACE !", false, ICONS.flame);
       }
     }
   }
